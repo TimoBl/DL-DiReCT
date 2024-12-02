@@ -137,33 +137,31 @@ def get_mesh(labels, white_srf, pial_srf):
 
 # calculate thickness
 # We calculate the thickness by labeling our vertices and taking their thickness (works only when voxel space 1mm ISO!)
-def get_thickness_stats(thickness, white_srf, pial_srf, aparc):
-    nearest_labels = label_points(white_srf.vertices, aparc)
+def get_thickness_stats(thickness, labels):
     out_thickness = {}
 
     for k, v in lut.items():
-        values = thickness[(nearest_labels == k)]
+        values = thickness[(labels == k)]
         out_thickness[v] = values[values > 0].mean() if sum(values > 0) > 0 else np.nan
 
-    out_thickness["lh-hemi"] = thickness[np.isin(nearest_labels, lh_labels)].mean()
-    out_thickness["rh-hemi"] = thickness[np.isin(nearest_labels, rh_labels)].mean()
+    out_thickness["lh-hemi"] = thickness[np.isin(labels, lh_labels)].mean()
+    out_thickness["rh-hemi"] = thickness[np.isin(labels, rh_labels)].mean()
     
     return out_thickness
 
 
 # calculate surface
 # We label each face by region, and then construct the mesh to calculate the area (works only when voxel space 1mm ISO!)
-def get_surface_stats(white_srf, pial_srf, aparc):
-    nearest_labels = label_points(white_srf.vertices, aparc)
+def get_surface_stats(pial_srf, labels):
     out_surface = {}
 
     for k, v in lut.items():
-        labels = (nearest_labels == k)
-        pial_mesh = get_mesh(labels, white_srf, pial_srf)
+        lbl = (labels == k)
+        pial_mesh = get_mesh(lbl, pial_srf)
         out_surface[v] = pial_mesh.area if pial_mesh.area > 0 else np.nan # we don't save one
 
-    out_surface["lh-hemi"] = get_mesh(np.isin(nearest_labels, lh_labels), white_srf, pial_srf).area
-    out_surface["rh-hemi"] = get_mesh(np.isin(nearest_labels, rh_labels), white_srf, pial_srf).area
+    out_surface["lh-hemi"] = get_mesh(np.isin(nearest_labels, lh_labels), pial_srf).area
+    out_surface["rh-hemi"] = get_mesh(np.isin(nearest_labels, rh_labels), pial_srf).area
     
     return out_surface
 
@@ -178,6 +176,12 @@ def write_stats(stats, subject_id, fname, label_names):
         writer = csv.writer(file, delimiter=',')
         writer.writerow(['SUBJECT'] + label_names)
         writer.writerow([subject_id] + list(stats))
+
+def create_annot(labels, lut, dst):
+    mapping = {v: k for k, v in lut.Label.items()}
+    labels = pd.Series(labels).map(mapping).values
+    ctab = lut[["R", "G", "B", "T", "Label"]].values.astype(int)
+    nib.freesurfer.io.write_annot(dst, labels, ctab, lut.Key.values, fill_ctab=True)
 
 
 if __name__ == '__main__':
@@ -219,11 +223,11 @@ if __name__ == '__main__':
 
     # get pial mesh and thickness measurements
     pial_srf, thickness = apply_deformation(white_srf, velocity_field)
-    pial_srf = trimesh.smoothing.filter_humphrey(pial_srf)
 
     # get metrics
-    out_thickness = get_thickness_stats(thickness, white_srf, pial_srf, aparc)
-    out_surface = get_surface_stats(white_srf, pial_srf, aparc)
+    nearest_labels = label_points(white_srf.vertices, aparc)
+    out_thickness = get_thickness_stats(thickness, nearest_labels)
+    out_surface = get_surface_stats(pial_srf, nearest_labels)
 
     # save metrics
     write_stats(list(out_thickness.values()), subject_id, '{}/result-thick-surf.csv'.format(dst_dir), list(out_thickness.keys())) # thickness
@@ -237,6 +241,9 @@ if __name__ == '__main__':
     print('mean thick: {:.3f} mm'.format(np.mean(list(out_thickness.values())[-2:])))
     print('total surface: {:.3f} mm^2'.format(np.sum(list(out_surface.values())[-2:])))
 
+    # save annotation
+    lut = pd.read_csv("fs_color.csv")
+    create_annot(nearest_labels, lut, dst_dir + "/aparc.annot")
 
     # Closest estimate 
     tree = spatial.cKDTree(white_srf.vertices) 
