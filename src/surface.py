@@ -122,13 +122,14 @@ def label_points(points, aparc, max_dst=3):
 
 
 # we get the mesh using binary mesh as ref
-def get_mesh(labels, white_srf, pial_srf):
+def get_mesh(pial_srf, nearest_labels):
     
-    faces = white_srf.faces.flatten()
-    vertices = white_srf.vertices[labels]
+    # get faces
+    faces = pial_srf.faces.flatten()
+    vertices = pial_srf.vertices[nearest_labels]
     
     # check if face has all vertices labeled
-    labeled = np.take(labels, faces) 
+    labeled = np.take(nearest_labels, faces) 
     labeled = labeled.reshape(pial_srf.faces.shape)
     faces = pial_srf.faces[labeled.all(axis=1)] # all vertices must be labeeld
     
@@ -137,31 +138,31 @@ def get_mesh(labels, white_srf, pial_srf):
 
 # calculate thickness
 # We calculate the thickness by labeling our vertices and taking their thickness (works only when voxel space 1mm ISO!)
-def get_thickness_stats(thickness, labels):
+def get_thickness_stats(thickness, nearest_labels):
     out_thickness = {}
 
     for k, v in lut.items():
-        values = thickness[(labels == k)]
+        values = thickness[(nearest_labels == k)]
         out_thickness[v] = values[values > 0].mean() if sum(values > 0) > 0 else np.nan
 
-    out_thickness["lh-hemi"] = thickness[np.isin(labels, lh_labels)].mean()
-    out_thickness["rh-hemi"] = thickness[np.isin(labels, rh_labels)].mean()
+    out_thickness["lh-hemi"] = thickness[np.isin(nearest_labels, lh_labels)].mean()
+    out_thickness["rh-hemi"] = thickness[np.isin(nearest_labels, rh_labels)].mean()
     
     return out_thickness
 
 
 # calculate surface
 # We label each face by region, and then construct the mesh to calculate the area (works only when voxel space 1mm ISO!)
-def get_surface_stats(pial_srf, labels):
+def get_surface_stats(pial_srf, nearest_labels):
     out_surface = {}
 
     for k, v in lut.items():
-        lbl = (labels == k)
-        pial_mesh = get_mesh(lbl, pial_srf)
+        lbl = (nearest_labels == k)
+        pial_mesh = get_mesh(pial_srf, lbl)
         out_surface[v] = pial_mesh.area if pial_mesh.area > 0 else np.nan # we don't save one
 
-    out_surface["lh-hemi"] = get_mesh(np.isin(nearest_labels, lh_labels), pial_srf).area
-    out_surface["rh-hemi"] = get_mesh(np.isin(nearest_labels, rh_labels), pial_srf).area
+    out_surface["lh-hemi"] = get_mesh(pial_srf, np.isin(nearest_labels, lh_labels)).area
+    out_surface["rh-hemi"] = get_mesh(pial_srf, np.isin(nearest_labels, rh_labels)).area
     
     return out_surface
 
