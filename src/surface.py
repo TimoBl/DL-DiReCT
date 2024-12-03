@@ -11,7 +11,7 @@ from scipy import spatial, ndimage
 from scipy.interpolate import RegularGridInterpolator
 from skimage.filters import gaussian
 from tca import topology
-
+from skimage.transform import rescale
 
 
 # global var
@@ -75,6 +75,34 @@ def gen_mesh(seg: np.ndarray) -> trimesh.base.Trimesh:
     vert, fcs, _, val = measure.marching_cubes(sdf_topo, level=0)
     mesh = trimesh.base.Trimesh(vertices=vert, faces=fcs)
     return mesh
+
+# upsampled higher resolution mesh
+def gen_up_sampled_mesh(src_dir, size=2):
+    # load
+    gm = nib.load(os.path.join(src_dir, "gmprob.nii")).get_fdata()
+    wm = nib.load(os.path.join(src_dir, "wmprob.nii.gz")).get_fdata()
+    
+    # fill structure
+    wm[np.isin(aparc, dien)] = 1 # fill subcortical sturcture
+    gm[np.isin(aparc, dien)] = 0 # fill subcortical sturcture
+    
+    # upsample
+    gm = rescale(gm, size, order=3, mode=‘constant’)
+    wm = rescale(wm, size, order=3, mode=‘constant’)
+    
+    # argmax
+    seg = np.argmax(np.array([gm, wm]), axis=0) * ((wm + gm) > 0.7)
+    
+    # create mesh and smooth
+    white_srf = gen_mesh(seg)
+    white_srf = trimesh.smoothing.filter_laplacian(white_srf) # works, maybe need even more aggressive
+    
+    # register back
+    scale_mat = np.eye(4) * 0.5
+    scale_mat[-1,-1] = 0
+    white_srf = white_srf.apply_transform(scale_mat)
+    return white_srf
+
 
 # move with DiReCT deformation Field    
 def apply_deformation(mesh, def_field, step_size=0.05):
