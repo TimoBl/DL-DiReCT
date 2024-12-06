@@ -11,6 +11,7 @@ from scipy import spatial, ndimage
 from scipy.interpolate import RegularGridInterpolator
 from skimage.filters import gaussian
 from tca import topology
+import skimage
 from skimage.transform import rescale
 
 
@@ -76,47 +77,49 @@ def gen_mesh(seg: np.ndarray) -> trimesh.base.Trimesh:
     mesh = trimesh.base.Trimesh(vertices=vert, faces=fcs)
     return mesh
 
-# upsampled higher resolution mesh
-def gen_up_sampled_mesh(src_dir, size=2):
-    # load
-    gm = nib.load(os.path.join(src_dir, "gmprob.nii")).get_fdata()
-    wm = nib.load(os.path.join(src_dir, "wmprob.nii.gz")).get_fdata()
+
+# get upsampled mesh
+def up_sampled_mesh(src_dir, size=2):
     
-    # fill structure
+    # load
+    gm = nib.load(os.path.join(src_dir, "gmprob.nii.gz")).get_fdata()
+    wm = nib.load(os.path.join(src_dir, "wmprob.nii.gz")).get_fdata()
+
+    # save subcortical
     wm[np.isin(aparc, dien)] = 1 # fill subcortical sturcture
     gm[np.isin(aparc, dien)] = 0 # fill subcortical sturcture
-    
+
     # upsample
-    gm = rescale(gm, size, order=3, mode=‘constant’)
-    wm = rescale(wm, size, order=3, mode=‘constant’)
-    
-    # argmax
-    seg = np.argmax(np.array([gm, wm]), axis=0) * ((wm + gm) > 0.7)
+    gm = skimage.transform.rescale(gm, size, order=3, mode='constant')
+    wm = skimage.transform.rescale(wm, size, order=3, mode='constant')
+
+    # clean seg
+    seg = np.argmax(np.array([gm, wm]), axis=0) * ((wm + gm) >= 0.5)
+    white = clean_seg(clean_seg(seg))
     
     # create mesh and smooth
-    white_srf = gen_mesh(seg)
-    white_srf = trimesh.smoothing.filter_laplacian(white_srf) # works, maybe need even more aggressive
+    white_srf = gen_mesh(white)
     
     # register back
     scale_mat = np.eye(4) * 0.5
     scale_mat[-1,-1] = 0
     white_srf = white_srf.apply_transform(scale_mat)
+    
     return white_srf
 
-
-# move with DiReCT deformation Field    
-def apply_deformation(mesh, def_field, step_size=0.05):
+   
+# DiReCT deformation Field    
+def apply_deformation(points, def_field, step_size=0.1, method="linear"):
     
-    vertices = mesh.vertices.copy().astype(precision)
-    faces = mesh.faces.copy()
-    thickness = np.zeros(len(vertices)).astype(precision)
+    points = points.copy().astype(precision)
+    thickness = np.zeros(len(points)).astype(precision)
 
-    method = "linear" 
     x, y, z, intstep, vi = def_field.shape
     dx, dy, dz = np.arange(x), np.arange(y), np.arange(z)
     
     # we integrate our 10 time points
     print("Deforming Surface", end="")
+    #for i in range(0, 10, 1):
     for i in range(0, 10, 1):
         
         vex = RegularGridInterpolator((dx, dy, dz), def_field[ :, :, :, i, 0], method=method)
@@ -124,13 +127,12 @@ def apply_deformation(mesh, def_field, step_size=0.05):
         vez = RegularGridInterpolator((dx, dy, dz), def_field[ :, :, :, i, 2], method=method) 
         
         for j in np.arange(0, 1, step_size):
-            v = np.array([vex(vertices), vey(vertices), vez(vertices)]).T
-            vertices += (step_size * v)
+            v = np.array([vex(points), vey(points), vez(points)]).T
+            points += (step_size * v)
             thickness +=  np.linalg.norm(step_size * v, axis=1)
         print(".", end="", flush=True)
     
-    mesh = trimesh.Trimesh(vertices=vertices, faces=mesh.faces)
-    return mesh, thickness
+    return points, thickness
 
 
 # used to match points to the segmentation
@@ -246,12 +248,13 @@ if __name__ == '__main__':
     rh_labels = labl[(labl >= 2000+offset) & (labl < 3000+offset)]
 
     # get wm surface mesh
-    white = clean_seg(np.clip((seg == 3) + np.isin(aparc, dien), 0, 1))
-    white_srf = gen_mesh(white)
-    white_srf = trimesh.smoothing.filter_humphrey(white_srf)
+    white_srf = up_sampled_mesh(src_dir, size=2)
+    white_srf =  trimesh.smoothing.filter_laplacian(white_srf)
 
     # get pial mesh and thickness measurements
-    pial_srf, thickness = apply_deformation(white_srf, velocity_field)
+    vertices, thickness = apply_deformation(white_srf.vertices, velocity_field)
+    pial_srf = trimesh.Trimesh(vertices=vertices, faces=white_srf.faces)
+    pial_srf = trimesh.smoothing.filter_laplacian(pial_srf)
 
     # get metrics
     nearest_labels = label_points(white_srf.vertices, aparc)
@@ -274,8 +277,12 @@ if __name__ == '__main__':
     lut = pd.read_csv("fs_color.csv")
     create_annot(nearest_labels, lut, dst_dir + "/aparc.annot")
 
+    # save thickness map
+    nib.freesurfer.io.write_morph_data(dst_dir + "/srf/thickness", thickness, fnum=0)
+
     # Closest estimate 
     tree = spatial.cKDTree(white_srf.vertices) 
     closest_thickness, idx = tree.query(pial_srf.vertices, k=1)
     closest_thickness = get_thickness_stats(closest_thickness, white_srf, pial_srf, aparc)
     write_stats(list(closest_thickness.values()), subject_id, '{}/result-thick-nearest.csv'.format(dst_dir), list(closest_thickness.keys()))
+    nib.freesurfer.io.write_morph_data(dst_dir + "/srf/thickness_closest", closest_thickness, fnum=0)
