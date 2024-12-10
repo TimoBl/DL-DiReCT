@@ -137,13 +137,13 @@ def get_mesh(pial_srf, nearest_labels):
 def get_freesurfer_distance(white_srf, pial_srf):
     # closest distance from white to pial
     tree = spatial.cKDTree(pial_srf.vertices) 
-    closest_thickness_wm, idx = tree.query(white_srf.vertices, k=1)
+    closest_thickness_pial, idx = tree.query(white_srf.vertices, k=1)
 
     # from those points calculate the closest distance to white
-    tree = spatial.cKDTree(pial_srf.vertices[idx]) 
-    closest_thickness_pial, idx = tree.query(white_srf.vertices, k=1)
+    tree = spatial.cKDTree(white_srf.vertices) 
+    closest_thickness_wm, idx = tree.query(pial_srf.vertices[idx], k=1)
     
-    return (closest_thickness_wm + closest_thickness_pial) / 2
+    return (closest_thickness_pial + closest_thickness_wm) / 2
 
 
 # calculate thickness
