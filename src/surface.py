@@ -133,6 +133,19 @@ def get_mesh(pial_srf, nearest_labels):
     return trimesh.Trimesh(vertices=pial_srf.vertices, faces=faces)
 
 
+# freesurfer definition of thickness
+def get_freesurfer_distance(white_srf, pial_srf):
+    # closest distance from white to pial
+    tree = spatial.cKDTree(pial_srf.vertices) 
+    closest_thickness_wm, idx = tree.query(white_srf.vertices, k=1)
+
+    # from those points calculate the closest distance to white
+    tree = spatial.cKDTree(pial_srf.vertices[idx]) 
+    closest_thickness_pial, idx = tree.query(white_srf.vertices, k=1)
+    
+    return (closest_thickness_wm + closest_thickness_pial) / 2
+
+
 # calculate thickness
 # We calculate the thickness by labeling our vertices and taking their thickness (works only when voxel space 1mm ISO!)
 def get_thickness_stats(thickness, nearest_labels):
@@ -248,9 +261,8 @@ if __name__ == '__main__':
     # save thickness map
     nib.freesurfer.io.write_morph_data(dst_dir + "/srf/thickness", thickness, fnum=0)
 
-    # Closest estimate 
-    tree = spatial.cKDTree(white_srf.vertices) 
-    closest_thickness, idx = tree.query(pial_srf.vertices, k=1)
-    closest_thickness = get_thickness_stats(closest_thickness, white_srf, pial_srf, aparc)
-    write_stats(list(closest_thickness.values()), subject_id, '{}/result-thick-nearest.csv'.format(dst_dir), list(closest_thickness.keys()))
-    nib.freesurfer.io.write_morph_data(dst_dir + "/srf/thickness_closest", closest_thickness, fnum=0)
+    # Closest estimate
+    closest_thickness = get_freesurfer_distance(white_srf, pial_srf)
+    out_closest_thickness = get_thickness_stats(closest_thickness, nearest_labels)
+    write_stats(list(closest_thickness.values()), subject_id, '{}/result-thick-fs.csv'.format(dst_dir), list(closest_thickness.keys()))
+    nib.freesurfer.io.write_morph_data(dst_dir + "/srf/thickness_fs", closest_thickness, fnum=0)
