@@ -164,7 +164,7 @@ if __name__ == '__main__':
         #     KellyKapowski -d 3 -s ${DST}/seg.nii.gz -g ${DST}/gmprobT.nii.gz -w ${DST}/wmprobT.nii.gz -o ${THICK_VOLUME} -c "[ 45,0.0,10 ]" -v
         #thick = ants.kelly_kapowski(s=ants.from_numpy(seg_img), g=ants.from_numpy(gm_prob), w=ants.from_numpy(wm_prob), c='[ 45,0.0,10 ]', v='1')
         thick = ants.from_numpy(wm_prob.copy())
-        kelly_kapowski(s=ants.from_numpy(seg_img), g=ants.from_numpy(gm_prob), w=ants.from_numpy(wm_prob), c='[ 10,0.0,10 ]', v='1', o=[thick, dst+"/T1w_"])
+        kelly_kapowski(s=ants.from_numpy(seg_img), g=ants.from_numpy(gm_prob), w=ants.from_numpy(wm_prob), c='[ 45,0.0,10 ]', v='1', o=[thick, dst+"/T1w_"])
 
         # Check thickness is not still all zeros
         if thick.sum() == 0.0:

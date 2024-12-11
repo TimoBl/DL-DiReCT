@@ -11,8 +11,6 @@ from scipy import spatial, ndimage
 from scipy.interpolate import RegularGridInterpolator
 from skimage.filters import gaussian
 from tca import topology
-import skimage
-from skimage.transform import rescale
 
 
 # global var
@@ -255,7 +253,7 @@ if __name__ == '__main__':
     print('total surface: {:.3f} mm^2'.format(np.sum(list(out_surface.values())[-2:])))
 
     # save annotation
-    lut = pd.read_csv("fs_color.csv")
+    lut = pd.read_csv('{}/fs_color.csv'.format(os.path.dirname(os.path.realpath(sys.argv[0]))))
     create_annot(nearest_labels, lut, dst_dir + "/aparc.annot")
 
     # save thickness map
