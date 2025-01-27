@@ -1,0 +1,7 @@
+[console_scripts]
+batch-dl+direct = run_script:run
+direct = run_script:run
+dl+direct = run_script:run
+radiomics2table = radiomics2table:main
+radiomics_extractor = radiomics_extractor:main
+stats2table = stats2table:main

@@ -1,0 +1,9 @@
+LICENSE
+README.md
+pyproject.toml
+src/DL_DiReCT.egg-info/PKG-INFO
+src/DL_DiReCT.egg-info/SOURCES.txt
+src/DL_DiReCT.egg-info/dependency_links.txt
+src/DL_DiReCT.egg-info/entry_points.txt
+src/DL_DiReCT.egg-info/requires.txt
+src/DL_DiReCT.egg-info/top_level.txt
