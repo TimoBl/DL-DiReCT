@@ -1,3 +1,9 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[1]:
+
+
 import os
 import csv
 import sys
@@ -6,30 +12,63 @@ import pandas as pd
 import argparse
 import trimesh
 import nibabel as nib
-import skimage.measure as measure
+from skimage import measure
+from skimage import metrics
+import skimage.morphology as morphology
 from scipy import spatial, ndimage
 from scipy.interpolate import RegularGridInterpolator
 from skimage.filters import gaussian
 from tca import topology
+#from src import get_crop, apply_crop, apply_uncrop
 
 
-# global var
-topo = topology()
+# In[2]:
+
+
 spike_filter = np.array([[[0, 0, 0], [0, 1, 0], [0, 0, 0]],
                          [[0, 1, 0], [1, 0, 1], [0, 1, 0]],
                          [[0, 0, 0], [0, 1, 0], [0, 0, 0]]])
+
+
+# In[3]:
+
+
 dien = [101,10,11,12,13,26,28,125,17,18] + [112,49,50,51,52,58,60,125,53,54] + [14] # diencephalic structures we ignore
+
+
+# In[4]:
+
+
+topo = topology()
+
+
+# In[5]:
+
+
+def get_crop(volume):
+    nonempty = np.argwhere(volume)
+    top_left = nonempty.min(axis=0)
+    bottom_right = nonempty.max(axis=0)
+    
+    return (top_left, bottom_right)
+
+
+# In[6]:
 
 
 # get cortical labels
 def get_labels(offset):
-    lut = pd.read_csv('{}/fs_lut.csv'.format(os.path.dirname(os.path.realpath(sys.argv[0]))))
+    #lut = pd.read_csv('{}/fs_lut.csv'.format(os.path.dirname(os.path.realpath(sys.argv[0]))))
+    lut = pd.read_csv('fs_lut.csv')
     lut = {l.Key: l.Label for _, l in lut.iterrows() if l.Label >= offset and l.Label <= 3000+offset}
     labels = list(filter(lambda x: ((x.startswith('lh') or x.startswith('rh')) and not 'nknown' in x and not 'corpuscallosum' in x and not 'Medial_wall' in x), lut.keys()))
     all_labels = labels + ['lh-MeanThickness', 'rh-MeanThickness']
     return lut, labels, all_labels
 
-# remove spikes in
+
+# In[7]:
+
+
 def clean_seg(seg):
     cc, nc = measure.label(seg, connectivity=2, return_num=True)
     cc_max = 1 + np.argmax(np.array([np.count_nonzero(cc == i) for i in range(1, nc + 1)]))
@@ -39,8 +78,13 @@ def clean_seg(seg):
     seg_c = np.where(seg_c, 1, 0)
     return seg_c
 
+
+# In[8]:
+
+
 # Transformation for FreeSurfer Space
 def get_vox2ras_tkr(t1):
+    
     ds = t1.header._structarr['pixdim'][1:4]
     ns = t1.header._structarr['dim'][1:4] * ds / 2.0
     v2rtkr = np.array([[-ds[0], 0, 0, ns[0]],
@@ -48,6 +92,10 @@ def get_vox2ras_tkr(t1):
                        [0, -ds[1], 0, ns[1]],
                        [0, 0, 0, 1]], dtype=np.float32)            
     return v2rtkr
+
+
+# In[9]:
+
 
 # transform to FreeSurfer Space
 def register(mesh, ref_volume, output, volume_info=None, translate=[0, 0, 0]):
@@ -57,14 +105,18 @@ def register(mesh, ref_volume, output, volume_info=None, translate=[0, 0, 0]):
     affine = get_vox2ras_tkr(ref_volume)
     
     # apply affine for FS visualization and matching with the MRI
-    mesh.vertices = nib.affines.apply_affine(affine, mesh.vertices + translate)
+    mesh.vertices = nib.affines.apply_affine(affine, mesh.vertices + translate)  
     mesh.invert()
     
     nib.freesurfer.io.write_geometry(output, mesh.vertices, mesh.faces, create_stamp=None, volume_info=volume_info)
     return mesh
 
-''' Nico's Method -> depricated
-# generate mesh from seg using marching cubes
+
+# In[10]:
+
+
+'''
+# DEPRICATED
 def gen_mesh(seg: np.ndarray) -> trimesh.base.Trimesh:
     #Topology correction algorithm taken from [CORTEXODE]
     sdf = -ndimage.distance_transform_cdt(seg) + ndimage.distance_transform_cdt(1-seg)
@@ -72,15 +124,38 @@ def gen_mesh(seg: np.ndarray) -> trimesh.base.Trimesh:
     sdf_topo = topo.apply(sdf, threshold=20)
     vert, fcs, _, val = measure.marching_cubes(sdf_topo, level=0)
     mesh = trimesh.base.Trimesh(vertices=vert, faces=fcs)
+    mesh = trimesh.smoothing.filter_humphrey(mesh)
     return mesh
 '''
 
-# create marching cubes mesh using the probability map as level set
+
+# In[46]:
+
+
+# get wm
+def fill_wm(wm_prob, aparc):
+    # to deal with subcortical regions
+    mask = np.isin(aparc, dien) | (aparc == 41) | (aparc == 2) # diencephalic + wm
+    mask = morphology.binary_erosion(morphology.binary_closing(mask)) # not ideal but works
+    wm_prob[mask.astype(bool)] = 1
+    
+    # correct topology
+    #sdf_topo = topo.apply(wm_prob, threshold=0.5)
+    
+    # makes sure to remove border 
+    #sdf_topo *= clean_seg(sdf_topo > 0) # fully connected
+    
+    return wm_prob
+
+# # create marching cubes mesh
 def gen_mesh(prob):
-    vert, fcs, _, val = measure.marching_cubes(prob, level=0.5, allow_degenerate=False) # use 0.5 as level set -> middle of WM/GM boundary
+    vert, fcs, _, val = measure.marching_cubes(prob, level=0.5, allow_degenerate=False) # use 0.5 as level set
     srf = trimesh.base.Trimesh(vertices=vert, faces=fcs)
     trimesh.repair.fix_normals(srf, multibody=False)
     return srf
+
+
+# In[47]:
 
 
 # DiReCT deformation Field    
@@ -110,37 +185,26 @@ def apply_deformation(points, def_field, step_size=0.1, order=3):
     return points, thickness
 
 
+# In[48]:
+
+
 # used to match points to the segmentation
 def label_points(points, aparc, max_dst=3):
 
     # build tree for labeling
-    coords_parc = np.array(np.where(aparc >= 1000)).T # we limit to cortex, and offset to be at center of voxel
+    coords_parc = np.array(np.where(aparc >= 1000)).T # we limit to cortex
     tree = spatial.cKDTree(coords_parc + 0.5) # offset to be at the center of voxel
 
     # and label for thickness
     nearest_distances, nearest_indices = tree.query(points, k=1) # we use the wm, it's more stable
     nearest_coords = coords_parc[nearest_indices] 
     nearest_labels = np.array(aparc[nearest_coords[:, 0], nearest_coords[:, 1], nearest_coords[:, 2]], dtype=int)
-    nearest_labels[nearest_distances > max_dst] = -1 # contrain distance,
+    nearest_labels[nearest_distances > max_dst] = 0 # contrain distance, so we set as unknown
     
     return nearest_labels
 
 
-# get wm
-def fill_wm(wm_prob, aparc):
-    # to deal with subcortical regions
-    mask = np.isin(aparc, dien) | (aparc == 41) | (aparc == 2) # diencephalic + wm
-    mask = morphology.binary_erosion(morphology.binary_closing(mask)) # not ideal but works
-    wm_prob[mask] = 1
-    
-    # correct topology
-    #sdf_topo = topo.apply(wm_prob, threshold=0.5)
-    
-    # makes sure to remove border 
-    #sdf_topo *= clean_seg(sdf_topo > 0) # fully connected
-    
-    sdf_topo = wm_prob.copy()
-    return sdf_topo
+# In[49]:
 
 
 # we get the mesh using binary mesh as ref
@@ -158,17 +222,7 @@ def get_mesh(pial_srf, nearest_labels):
     return trimesh.Trimesh(vertices=pial_srf.vertices, faces=faces)
 
 
-# freesurfer definition of thickness
-def get_freesurfer_distance(white_srf, pial_srf):
-    # closest distance from white to pial
-    tree = spatial.cKDTree(pial_srf.vertices) 
-    closest_thickness_pial, idx = tree.query(white_srf.vertices, k=1)
-
-    # from those points calculate the closest distance to white
-    tree = spatial.cKDTree(white_srf.vertices) 
-    closest_thickness_wm, idx = tree.query(pial_srf.vertices[idx], k=1)
-    
-    return (closest_thickness_pial + closest_thickness_wm) / 2
+# In[50]:
 
 
 # calculate thickness
@@ -178,12 +232,15 @@ def get_thickness_stats(thickness, nearest_labels):
 
     for k, v in lut.items():
         values = thickness[(nearest_labels == k)]
-        out_thickness[v] = values[values > 0].mean() if sum(values > 0) > 0 else np.nan
+        out_thickness[v] = values[values > 0].mean() if sum(values > 0) else np.nan
 
     out_thickness["lh-hemi"] = thickness[np.isin(nearest_labels, lh_labels)].mean()
     out_thickness["rh-hemi"] = thickness[np.isin(nearest_labels, rh_labels)].mean()
     
     return out_thickness
+
+
+# In[51]:
 
 
 # calculate surface
@@ -202,10 +259,32 @@ def get_surface_stats(pial_srf, nearest_labels):
     return out_surface
 
 
-# helper
+# In[79]:
+
+
+# used to calculate freesurfer distance
+def get_freesurfer_distance(white_srf, pial_srf):
+    # closest distance from white to pial
+    tree = spatial.cKDTree(pial_srf.vertices) 
+    closest_thickness_pial, idx = tree.query(white_srf.vertices, k=1)
+
+    # from those points calculate the closest distance to white
+    tree = spatial.cKDTree(white_srf.vertices) 
+    closest_thickness_wm, idx = tree.query(pial_srf.vertices[idx], k=1)
+    
+    return (closest_thickness_pial + closest_thickness_wm) / 2
+
+
+# In[53]:
+
+
 def mkdir(OUT_DIR):
     if not os.path.exists(OUT_DIR):
         os.mkdir(OUT_DIR)
+
+
+# In[54]:
+
 
 def write_stats(stats, subject_id, fname, label_names):    
     with open(fname, 'w') as file:
@@ -213,11 +292,20 @@ def write_stats(stats, subject_id, fname, label_names):
         writer.writerow(['SUBJECT'] + label_names)
         writer.writerow([subject_id] + list(stats))
 
+
+# In[55]:
+
+
 def create_annot(labels, lut, dst):
     mapping = {v: k for k, v in lut.Label.items()}
     labels = pd.Series(labels).map(mapping).values
     ctab = lut[["R", "G", "B", "T", "Label"]].values.astype(int)
     nib.freesurfer.io.write_annot(dst, labels, ctab, lut.Key.values, fill_ctab=True)
+
+
+# ## MAIN
+
+# In[56]:
 
 
 if __name__ == '__main__':
@@ -234,8 +322,33 @@ if __name__ == '__main__':
     subject_id = args.subject_id
     dst_dir = os.path.dirname(seg_file)
 
+
+# In[57]:
+
+
+    src_dir = "/Users/timoblattner/Desktop/sub-POB-HC0001_ses-17473A_acq-t1-mpr-adni3-sag-iso-1mm-ns-TR-2.3-IR-0.9_run-1/"
+    velocity_file = os.path.join(src_dir, "ForwardVelocityField.nii.gz")
+    seg_file = os.path.join(src_dir, "seg.nii.gz")
+    aparc_file = os.path.join(src_dir, "softmax_seg.nii.gz")
+    subject_id = "sub-POB-HC0001_ses-17473A_acq-t1-mpr-adni3-sag-iso-1mm-ns-TR-2.3-IR-0.9_run-1"
+    dst_dir = src_dir
+
+
+    # In[58]:
+
+
+    t1w = nib.load(os.path.join(src_dir, "T1w_norm_noskull_cropped.nii.gz")).get_fdata()
+
+
+    # In[59]:
+
+
     lowmem = True # if lowmen -> likely we can use this by default
     precision = np.float32 if lowmem else np.float64 
+
+
+    # In[60]:
+
 
     # load files
     ref_file = nib.load(seg_file)
@@ -243,53 +356,162 @@ if __name__ == '__main__':
     aparc = nib.load(aparc_file).get_fdata().astype(precision)
     velocity_field = nib.load(velocity_file).get_fdata().astype(precision)
 
-    # labels
+
+    # In[61]:
+
+
+    # use the probability map
+    wm_prob = nib.load(os.path.join(src_dir, "wmprob.nii.gz")).get_fdata()
+    gm_prob = nib.load(os.path.join(src_dir, "gmprob.nii.gz")).get_fdata()
+
+
+    # In[62]:
+
+
     offset = 0 if np.max(aparc) <= 3000 else 10000
     lut, labels, all_labels = get_labels(offset)
     lut = {k: v for v, k in lut.items() if k >= 1000+offset and k <= 3000+offset}
+
+
+    # In[63]:
+
 
     labl = np.unique(aparc).astype(int)
     lh_labels = labl[(labl >= 1000+offset) & (labl < 2000+offset)]
     rh_labels = labl[(labl >= 2000+offset) & (labl < 3000+offset)]
 
-    # get wm surface mesh
+
+    # In[64]:
+
+
+    # get wm surface mesh (old method)
     #white = clean_seg(np.clip((seg == 3) + np.isin(aparc, dien), 0, 1))
     #white_srf = gen_mesh(white)
+    #white_srf = trimesh.smoothing.filter_humphrey(white_srf)
+
+
+    # In[65]:
+
+
     wm_prob = fill_wm(wm_prob, aparc)
     white_srf = gen_mesh(wm_prob)
     white_srf = trimesh.smoothing.filter_humphrey(white_srf)
+
+
+    # In[66]:
+
+
+    #print(white_srf.area)
+    #white_srf.show()
+
+
+    # In[67]:
+
 
     # get pial mesh and thickness measurements
     vertices, thickness = apply_deformation(white_srf.vertices, velocity_field, step_size=0.1, order=3)
     pial_srf = trimesh.Trimesh(vertices=vertices, faces=white_srf.faces)
     pial_srf = trimesh.smoothing.filter_humphrey(pial_srf)
 
+
+    # In[68]:
+
+
+    #print(pial_srf.area)
+    #pial_srf.show()
+
+
+    # In[69]:
+
+
     # get metrics
     nearest_labels = label_points(white_srf.vertices, aparc)
     out_thickness = get_thickness_stats(thickness, nearest_labels)
     out_surface = get_surface_stats(pial_srf, nearest_labels)
 
+
+    # In[70]:
+
+
     # save metrics
-    write_stats(list(out_thickness.values()), subject_id, '{}/result-thick-surf.csv'.format(dst_dir), list(out_thickness.keys())) # thickness
+    write_stats(list(out_thickness.values()), subject_id, '{}/result-thick_direct.csv'.format(dst_dir), list(out_thickness.keys())) # thickness
     write_stats(list(out_surface.values()), subject_id, '{}/result-surf.csv'.format(dst_dir), list(out_surface.keys())) # surface
+
+
+    # In[71]:
+
 
     # save surfaces
     mkdir(dst_dir + "/srf/")
     register(white_srf, ref_file, dst_dir + "/srf/" + '/white')
     register(pial_srf, ref_file, dst_dir  + "/srf/" + '/pial')
 
+
+    # In[72]:
+
+
     print('mean thick: {:.3f} mm'.format(np.mean(list(out_thickness.values())[-2:])))
     print('total surface: {:.3f} mm^2'.format(np.sum(list(out_surface.values())[-2:])))
 
-    # save annotation
-    lut = pd.read_csv('{}/fs_color.csv'.format(os.path.dirname(os.path.realpath(sys.argv[0]))))
-    create_annot(nearest_labels, lut, dst_dir + "/aparc.annot")
 
-    # save thickness map
+    # In[73]:
+
+
+    # save annotation
+    color_lut = pd.read_csv("fs_color.csv")
+    create_annot(nearest_labels, color_lut, dst_dir + "/srf/aparc.annot")
+
+
+    # In[74]:
+
+
+    # save thciknnes mapp
     nib.freesurfer.io.write_morph_data(dst_dir + "/srf/thickness", thickness, fnum=0)
 
-    # Closest estimate
+
+    # ## Alternate metrics
+
+    # In[75]:
+
+
+
+
+
+    # In[76]:
+
+
     closest_thickness = get_freesurfer_distance(white_srf, pial_srf)
-    out_closest_thickness = get_thickness_stats(closest_thickness, nearest_labels)
-    write_stats(list(closest_thickness.values()), subject_id, '{}/result-thick-fs.csv'.format(dst_dir), list(closest_thickness.keys()))
+    out_thickness_fs = get_thickness_stats(closest_thickness, nearest_labels)
+
+
+    # In[77]:
+
+
+    # save metrics
+    write_stats(list(out_thickness_fs.values()), subject_id, '{}/result-thick_fs.csv'.format(dst_dir), list(out_thickness_fs.keys())) # thickness
+
+
+    # In[78]:
+
+
+    # save thciknnes mapp
     nib.freesurfer.io.write_morph_data(dst_dir + "/srf/thickness_fs", closest_thickness, fnum=0)
+
+
+    # In[99]:
+
+
+    #nib.save(nib.Nifti1Image(velocity_field[:,:,:,-1,:], affine), os.path.join(src_dir, 'velocity.nii.gz')) 
+
+
+    # In[ ]:
+
+
+
+
+
+    # In[ ]:
+
+
+
+
