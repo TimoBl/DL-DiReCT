@@ -38,11 +38,7 @@ if [ -f ${DST}/T1w_norm_noskull_mask.nii.gz ] ; then
 fi
 
 # DiReCT
-if [ ! -f ${DST}/T1w_thickmap.nii.gz ] ; then
-	python ${SCRIPT_DIR}/DiReCT.py "${DST}" "${DST}"
-else
-	echo "Found Thickness Map"
-fi
+python ${SCRIPT_DIR}/DiReCT.py "${DST}" "${DST}"
 
 # extract stats
 THICK_VOLUME=${DST}/T1w_thickmap.nii.gz

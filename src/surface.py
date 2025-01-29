@@ -58,8 +58,7 @@ def get_crop(volume):
 
 # get cortical labels
 def get_labels(offset):
-    #lut = pd.read_csv('{}/fs_lut.csv'.format(os.path.dirname(os.path.realpath(sys.argv[0]))))
-    lut = pd.read_csv('fs_lut.csv')
+    lut = pd.read_csv('{}/fs_lut.csv'.format(os.path.dirname(os.path.realpath(sys.argv[0]))))
     lut = {l.Key: l.Label for _, l in lut.iterrows() if l.Label >= offset and l.Label <= 3000+offset}
     labels = list(filter(lambda x: ((x.startswith('lh') or x.startswith('rh')) and not 'nknown' in x and not 'corpuscallosum' in x and not 'Medial_wall' in x), lut.keys()))
     all_labels = labels + ['lh-MeanThickness', 'rh-MeanThickness']
@@ -320,24 +319,18 @@ if __name__ == '__main__':
     seg_file = args.seg_file
     aparc_file = args.aparc_file
     subject_id = args.subject_id
-    dst_dir = os.path.dirname(seg_file)
+    src_dir = os.path.dirname(seg_file)
+
+    dst_dir = src_dir 
 
 
 # In[57]:
 
 
-    src_dir = "/Users/timoblattner/Desktop/sub-POB-HC0001_ses-17473A_acq-t1-mpr-adni3-sag-iso-1mm-ns-TR-2.3-IR-0.9_run-1/"
-    velocity_file = os.path.join(src_dir, "ForwardVelocityField.nii.gz")
-    seg_file = os.path.join(src_dir, "seg.nii.gz")
-    aparc_file = os.path.join(src_dir, "softmax_seg.nii.gz")
-    subject_id = "sub-POB-HC0001_ses-17473A_acq-t1-mpr-adni3-sag-iso-1mm-ns-TR-2.3-IR-0.9_run-1"
-    dst_dir = src_dir
-
-
     # In[58]:
 
 
-    t1w = nib.load(os.path.join(src_dir, "T1w_norm_noskull_cropped.nii.gz")).get_fdata()
+    #t1w = nib.load(os.path.join(src_dir, "T1w_norm_noskull_cropped.nii.gz")).get_fdata()
 
 
     # In[59]:
@@ -458,7 +451,8 @@ if __name__ == '__main__':
 
 
     # save annotation
-    color_lut = pd.read_csv("fs_color.csv")
+    #color_lut = pd.read_csv("fs_color.csv")
+    color_lut = pd.read_csv('{}/fs_color.csv'.format(os.path.dirname(os.path.realpath(sys.argv[0]))))
     create_annot(nearest_labels, color_lut, dst_dir + "/srf/aparc.annot")
 
 
